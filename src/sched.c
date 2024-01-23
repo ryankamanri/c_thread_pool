@@ -3,13 +3,14 @@
 #include <sys/time.h>
 #include <signal.h>
 #include <stdio.h>
+#include <Windows.h>
 
 extern struct task_struct *current;
 extern struct task_struct *task[NR_TASKS];
 
 void switch_to(struct task_struct *next);
 
-static unsigned int getmstime() {
+static unsigned long long getmstime() {
   struct timeval tv;
   if (gettimeofday(&tv, NULL) < 0) {
     perror("gettimeofday");
@@ -39,14 +40,14 @@ static struct task_struct *pick() {
 
     if( task[i]->status == THREAD_EXIT){
       if(task[i]!=current)
-        remove_th(i);
+        __remove_thread__(i);
       continue;
     }
   
     if (task[i]->status == THREAD_DISPOSED)
    {
      if(task[i]!=current)
-      remove_th(i);
+      __remove_thread__(i);
      continue;
    }
 
@@ -84,22 +85,16 @@ static struct task_struct *pick() {
   return task[next];
 }
 
+volatile int signal_blocked = 0;
+
 void closealarm() {
-    sigset_t mask;
-    sigemptyset(&mask);
-    sigaddset(&mask, SIGALRM);
-    if (sigprocmask(SIG_BLOCK, &mask, NULL) < 0) {
-      perror("sigprocmask BLOCK");
-    }
+
+    signal_blocked = 1;
 }
 
 void openalarm() {
-    sigset_t mask;
-    sigemptyset(&mask);
-    sigaddset(&mask, SIGALRM);
-    if (sigprocmask(SIG_UNBLOCK, &mask, NULL) < 0) {
-      perror("sigprocmask BLOCK");
-    }
+
+    signal_blocked = 0;
 }
 
 
@@ -110,13 +105,14 @@ void schedule() {
     }
 }
 
-void mysleep(int seconds) {
-  current->wakeuptime = getmstime() + 1000*seconds;
+void mysleep(int milliseconds) {
+  current->wakeuptime = getmstime() + milliseconds;
   current->status = THREAD_SLEEP;
   schedule();
 }
 
-static void do_timer() {
+void WINAPI do_timer(UINT uTimerID, UINT uMsg, DWORD_PTR dwUser, DWORD_PTR dw1, DWORD_PTR dw2) {
+  if (signal_blocked) return;
   if (--current->counter > 0) return;
   current->counter = 0;
   schedule();
@@ -125,13 +121,6 @@ static void do_timer() {
 
 __attribute__((constructor))
 static void init() {
-  struct itimerval value;
-  value.it_value.tv_sec = 0;
-  value.it_value.tv_usec = 1000;
-  value.it_interval.tv_sec = 0;
-  value.it_interval.tv_usec = 1000*10; // 10 ms
-  if (setitimer(ITIMER_REAL, &value, NULL) < 0) {
-    perror("setitimer");
-  }
-  signal(SIGALRM, do_timer);
+
+  timeSetEvent(1000, 1, (LPTIMECALLBACK)do_timer, (DWORD_PTR)NULL, TIME_PERIODIC);
 }
